@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,16 +20,17 @@ type Query struct {
 }
 
 func main() {
-	ensureEnv("API")
+	var api = ensureEnv("API")
+
+	fetchItem(api)
 
 	g := gin.Default()
 	g.GET("/", toJSON)
 	g.POST("/echo", queryJSON)
-	// g.POST("/query", queryJSON)
 	g.Run() // default localhost:8080
 }
 
-func ensureEnv(key string) {
+func ensureEnv(key string) string {
 	val, ok := os.LookupEnv(key)
 	if !ok {
 		// Early returning, return 1 to end this process
@@ -37,6 +39,7 @@ func ensureEnv(key string) {
 	} else {
 		fmt.Printf("Using \"%s\" as API key / client ID...\n\n", val)
 	}
+	return val
 }
 
 func toJSON(c *gin.Context) {
@@ -64,4 +67,27 @@ func queryJSON(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, queryJSON)
+}
+
+// Using /v2/creativestofollow to fetch a list of creatives.
+// And, it accepts a parameter to do pagination.
+// https://www.behance.net/dev/api/endpoints/9
+func fetchItem(apiKey string) {
+	fetch := func(url string, page int, dest interface{}) error {
+		urlWithPage := fmt.Sprintf("%s?page=%d&client_id=%s", url, page, apiKey)
+		response, err := http.Get(urlWithPage)
+		if err != nil {
+			log.Printf("%s\n", err)
+		}
+		defer response.Body.Close() // resource management
+		return json.NewDecoder(response.Body).Decode(dest)
+	}
+
+	url := "https://api.behance.net/v2/creativestofollow"
+	var foobar map[string]interface{}
+	err := fetch(url, 1, &foobar)
+	if err != nil {
+		log.Fatalf("%s\n", err)
+	}
+	fmt.Printf("%+v\n", foobar)
 }
