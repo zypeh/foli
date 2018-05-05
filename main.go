@@ -69,6 +69,19 @@ func queryJSON(c *gin.Context) {
 	c.JSON(http.StatusOK, queryJSON)
 }
 
+// JSON parsing and accessing
+// https://github.com/astaxie/build-web-application-with-golang/blob/master/zh/07.2.md
+type CreativesSlice struct {
+	Creatives []Creative `json:"creatives_to_follow"`
+}
+
+type Creative struct {
+	ID          int                    `json:"id"`
+	Username    string                 `json:"username"`
+	DisplayName string                 `json:"display_name"`
+	Images      map[string]interface{} `json:"images"`
+}
+
 // Using /v2/creativestofollow to fetch a list of creatives.
 // And, it accepts a parameter to do pagination.
 // https://www.behance.net/dev/api/endpoints/9
@@ -84,10 +97,11 @@ func fetchItem(apiKey string) {
 	}
 
 	url := "https://api.behance.net/v2/creativestofollow"
-	var foobar map[string]interface{}
-	err := fetch(url, 1, &foobar)
+	var result CreativesSlice
+	err := fetch(url, 1, &result)
 	if err != nil {
 		log.Fatalf("%s\n", err)
 	}
-	fmt.Printf("%+v\n", foobar)
+	fmt.Printf("%s\n", result.Creatives[1].Username)
+	fmt.Printf("%s\n", result.Creatives[1].Images["115"])
 }
