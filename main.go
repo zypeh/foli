@@ -3,9 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -55,9 +60,10 @@ func main() {
 	var api = ensureEnv("API")
 
 	fetchItem(api)
+	fetchImages("https://mir-s3-cdn-cf.behance.net/projects/115/d595f541911437.Y3JvcCwxMjcyLDk5Niw2NSww.jpg")
 
 	g := gin.Default()
-	g.GET("/", toJSON)
+	g.POST("/", queryJSON)
 	g.POST("/echo", queryJSON)
 	g.Run() // default localhost:8080
 }
@@ -112,19 +118,56 @@ func fetchItem(apiKey string) {
 		response, err := http.Get(urlWithPage)
 		if err != nil {
 			log.Printf("%s\n", err)
+			return err
 		}
 		defer response.Body.Close() // resource management
-		return json.NewDecoder(response.Body).Decode(dest)
+		json.NewDecoder(response.Body).Decode(dest)
+		return nil
 	}
 
 	var userList CreativesSlice
-	fetch("https://api.behance.net/v2/creativestofollow", 1, &userList)
-	fmt.Printf("%s\n", userList.Creatives[0].Username)
-	// fmt.Printf("%s\n", result.Creatives[1].Images["115"])
 	var projectList UserProjectsSlice
-	fetch(fmt.Sprintf("https://api.behance.net/v2/users/%s/projects", userList.Creatives[0].Username), 1, &projectList)
-	fmt.Printf("%d\n", projectList.Projects[0].ID)
 	var resource Project
+	fetch("https://api.behance.net/v2/creativestofollow", 1, &userList)
+	// fmt.Printf("%s\n", result.Creatives[1].Images["115"])
+	fetch(fmt.Sprintf("https://api.behance.net/v2/users/%s/projects", userList.Creatives[0].Username), 1, &projectList)
 	fetch(fmt.Sprintf("https://api.behance.net/v2/projects/%d", projectList.Projects[0].ID), 1, &resource)
-	fmt.Printf("%+v\n", resource.Project)
+}
+
+func fetchImages(src string) error {
+	client := http.Client{
+		Transport: &http.Transport{
+			Dial: func(network, addr string) (net.Conn, error) {
+				return net.DialTimeout(network, addr, 3*time.Second)
+			},
+		},
+	}
+
+	resp, err := client.Get(src)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	b, err := ioutil.ReadAll(resp.Body) // reads until EOF, for byte[]
+	if err != nil {
+		return err
+	}
+
+	// Path setup
+	path := filepath.Join(".", "images")
+	os.MkdirAll(path, os.ModePerm)
+
+	filename := getFilename(src)
+	// saves to fs
+	ioutil.WriteFile(filepath.Join(path, filename), b, 0644)
+	return nil
+}
+
+func getFilename(src string) string {
+	url := strings.Split(src, "/")
+	if len(url) < 1 {
+		log.Fatalf("invalid url %s\n", src)
+	}
+	return url[len(url)-1]
 }
