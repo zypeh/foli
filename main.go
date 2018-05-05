@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asdine/storm"
 	"github.com/gin-gonic/gin"
 )
 
@@ -56,15 +57,33 @@ type ProjectParsed struct {
 	Src         map[string]interface{} `json:"covers"`
 }
 
+type Data struct {
+	ID          int    `storm:"id,increment" json:"id"`
+	Title       string `storm:"index" json:"title"`
+	Description string `json:"description"`
+	Filename    string `storm:"index" json:"filename"`
+	Src         string `storm:"index" json:"src"`
+}
+
+type Env struct {
+	db *storm.DB
+}
+
 func main() {
 	var api = ensureEnv("API")
 
-	fetchItem(api)
-	fetchImages("https://mir-s3-cdn-cf.behance.net/projects/115/d595f541911437.Y3JvcCwxMjcyLDk5Niw2NSww.jpg")
+	db, err := storm.Open(filepath.Join(".", "foli.db"))
+	if err != nil {
+		log.Fatalf("%s\n", err)
+	}
+	defer db.Close()
+
+	fetchItem(api, db)
 
 	g := gin.Default()
-	g.POST("/", queryJSON)
-	g.POST("/echo", queryJSON)
+	env := &Env{db: db}
+
+	g.GET("/", env.queryAll)
 	g.Run() // default localhost:8080
 }
 
@@ -95,16 +114,11 @@ func toJSON(c *gin.Context) {
 	c.JSON(http.StatusOK, respSlice)
 }
 
-func queryJSON(c *gin.Context) {
-	var queryJSON Query
-
-	// Early return
-	if c.BindJSON(&queryJSON) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Error occurred when parsing your JSON query ! X( "})
-		return
-	}
-
-	c.JSON(http.StatusOK, queryJSON)
+// Dump all the entries in DB
+func (e *Env) queryAll(c *gin.Context) {
+	var respJSON []Data
+	e.db.All(&respJSON)
+	c.JSON(http.StatusOK, respJSON)
 }
 
 // Use endpoint /v2/creativestofollow to fetch a list of creatives to follow (user). [get 10]
@@ -112,7 +126,7 @@ func queryJSON(c *gin.Context) {
 // Use endpoint /v2/projects/:id to fetch the cover and description needed.
 // And, it accepts a parameter to do pagination.
 // https://www.behance.net/dev/api/endpoints/9
-func fetchItem(apiKey string) {
+func fetchItem(apiKey string, db *storm.DB) {
 	fetch := func(url string, page int, dest interface{}) error {
 		urlWithPage := fmt.Sprintf("%s?page=%d&client_id=%s", url, page, apiKey)
 		response, err := http.Get(urlWithPage)
@@ -132,6 +146,17 @@ func fetchItem(apiKey string) {
 	// fmt.Printf("%s\n", result.Creatives[1].Images["115"])
 	fetch(fmt.Sprintf("https://api.behance.net/v2/users/%s/projects", userList.Creatives[0].Username), 1, &projectList)
 	fetch(fmt.Sprintf("https://api.behance.net/v2/projects/%d", projectList.Projects[0].ID), 1, &resource)
+
+	dataToDB := Data{
+		Title:       resource.Project.Title,
+		Description: resource.Project.Description,
+		Filename:    getFilename(resource.Project.Src["original"].(string)),
+		Src:         resource.Project.Src["original"].(string),
+	}
+
+	// TODO: buffer queue
+	go fetchImages(dataToDB.Src)
+	db.Save(&dataToDB)
 }
 
 func fetchImages(src string) error {
