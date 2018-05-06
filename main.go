@@ -13,19 +13,18 @@ import (
 	"time"
 
 	"github.com/asdine/storm"
+	"github.com/asdine/storm/q"
 	"github.com/gin-gonic/gin"
 )
 
-// has to be `type` to return JSON array
+// Has to be `type` to return JSON array
 // https://github.com/gin-gonic/gin/issues/87
-//
-// Using
-//
+type Queries []Query
 type Query struct {
-	Title      string `json:"title"`
-	Descrption string `json:"description"`
-	Filename   string `json:"filename"`
-	Src        string `json:"src"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Filename    string `json:"filename,omitempty"`
+	Src         string `json:"src,omitempty"`
 }
 
 // JSON parsing and accessing
@@ -77,13 +76,17 @@ func main() {
 		log.Fatalf("%s\n", err)
 	}
 	defer db.Close()
+	// Initialize buckets and indexes before saving an object
+	db.Init(&Data{})
 
 	fetchItem(api, db)
+	fmt.Println("Done! Now you may access the server via localhost:8080")
 
 	g := gin.Default()
 	env := &Env{db: db}
 
 	g.GET("/", env.queryAll)
+	g.POST("/q", env.queryJSON)
 	g.Run() // default localhost:8080
 }
 
@@ -99,26 +102,47 @@ func ensureEnv(key string) string {
 	return val
 }
 
-func toJSON(c *gin.Context) {
-	// c.JSON only accept interface{}
-	// https://github.com/gin-gonic/gin/issues/87
-	//
-	responses := []Query{
-		{"title1", "description1", "filename1", "src1"},
-		{"title2", "description2", "filename2", "src2"},
-	}
-	var respSlice = make([]interface{}, len(responses))
-	for i, resp := range responses {
-		respSlice[i] = resp
-	}
-	c.JSON(http.StatusOK, respSlice)
-}
-
 // Dump all the entries in DB
 func (e *Env) queryAll(c *gin.Context) {
 	var respJSON []Data
 	e.db.All(&respJSON)
 	c.JSON(http.StatusOK, respJSON)
+}
+
+// Query the entries in DB based on the user input JSON request
+func (e *Env) queryJSON(c *gin.Context) {
+	var userQueries Queries
+
+	// Parsing JSON, early return if error occurred
+	if c.BindJSON(&userQueries) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Error occurred when parsing your JSON query ! X( "})
+		return
+	}
+
+	results := make([]Data, len(userQueries))
+	for i, userQuery := range userQueries {
+		// Passing slice to a variadic function, learned
+		// https://blog.learngoprogramming.com/golang-variadic-funcs-how-to-patterns-369408f19085
+		var query []q.Matcher
+
+		if userQuery.Title != "" {
+			query = append(query, q.Eq("Title", userQuery.Title))
+		}
+		if userQuery.Description != "" {
+			query = append(query, q.Eq("Description", userQuery.Description))
+		}
+		if userQuery.Filename != "" {
+			query = append(query, q.Eq("Filename", userQuery.Filename))
+		}
+		if userQuery.Src != "" {
+			query = append(query, q.Eq("Src", userQuery.Src))
+		}
+		var resp Data
+		e.db.Select(query...).First(&resp)
+		results[i] = resp
+	}
+
+	c.JSON(http.StatusOK, results)
 }
 
 // Use endpoint /v2/creativestofollow to fetch a list of creatives to follow (user). [get 10]
