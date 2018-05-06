@@ -146,7 +146,7 @@ func (e *Env) queryJSON(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
-// Use endpoint /v2/creativestofollow to fetch a list of creatives to follow (user). [get 10]
+// Use endpoint /v2/creativestofollow to fetch a list of creatives to follow (user).
 // Use endpoint /v2/users/:username to fetch a list of projects created by user.
 // Use endpoint /v2/projects/:id to fetch the cover and description needed.
 // And, it accepts a parameter to do pagination.
@@ -167,21 +167,24 @@ func fetchItem(apiKey string, db *storm.DB) {
 	var userList CreativesSlice
 	var projectList UserProjectsSlice
 	var resource Project
-	fetch("https://api.behance.net/v2/creativestofollow", 1, &userList)
-	// fmt.Printf("%s\n", result.Creatives[1].Images["115"])
-	fetch(fmt.Sprintf("https://api.behance.net/v2/users/%s/projects", userList.Creatives[0].Username), 1, &projectList)
-	fetch(fmt.Sprintf("https://api.behance.net/v2/projects/%d", projectList.Projects[0].ID), 1, &resource)
+	for i := 0; i < 10; i++ {
+		fetch("https://api.behance.net/v2/creativestofollow", 1+i, &userList)
+		for j, creative := range userList.Creatives {
+			fetch(fmt.Sprintf("https://api.behance.net/v2/users/%s/projects", creative.Username), 1, &projectList)
+			fetch(fmt.Sprintf("https://api.behance.net/v2/projects/%d", projectList.Projects[0].ID), 1, &resource)
 
-	dataToDB := Data{
-		Title:       resource.Project.Title,
-		Description: resource.Project.Description,
-		Filename:    getFilename(resource.Project.Src["original"].(string)),
-		Src:         resource.Project.Src["original"].(string),
+			data := Data{
+				Title:       resource.Project.Title,
+				Description: resource.Project.Description,
+				Filename:    getFilename(resource.Project.Src["original"].(string)),
+				Src:         resource.Project.Src["original"].(string),
+			}
+
+			fmt.Printf("Fetching and populating...  %d / 100\n", i*10+j)
+			go fetchImages(data.Src)
+			go db.Save(&data)
+		}
 	}
-
-	// TODO: buffer queue
-	go fetchImages(dataToDB.Src)
-	db.Save(&dataToDB)
 }
 
 func fetchImages(src string) error {
