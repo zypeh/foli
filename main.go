@@ -87,6 +87,7 @@ func main() {
 
 	g.GET("/", env.queryAll)
 	g.POST("/q", env.queryJSON)
+	g.Static("/imgs", "./images")
 	g.Run() // default localhost:8080
 }
 
